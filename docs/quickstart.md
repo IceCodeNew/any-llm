@@ -174,7 +174,19 @@ response = llm.responses(
 print(response.output_text)
 ```
 
-Gemini text Interactions accept string input, instructions, maximum output tokens, and per-request timeouts. This first slice does not expose `store`, so Google's default storage behavior applies. Other Responses parameters, including media, tools, reasoning controls, structured output, chaining, metadata, background execution, and streaming raise `UnsupportedParameterError`.
+Pass `stream=True` to `responses()` for a synchronous event iterator. With the async API, await `aresponses()` and consume the returned async iterator:
+
+```python
+stream = await llm.aresponses(
+    model="gemini-3.8-flash",
+    input_data="Explain why the sky is blue.",
+    stream=True,
+)
+async for event in stream:
+    print(event.type)
+```
+
+Gemini text Interactions accept string input, instructions, maximum output tokens, per-request timeouts, and streaming. This first slice does not expose `store`, so Google's default storage behavior applies. Other Responses parameters, including media, tools, reasoning controls, structured output, chaining, metadata, and background execution, raise `UnsupportedParameterError`.
 
 ## Embeddings
 

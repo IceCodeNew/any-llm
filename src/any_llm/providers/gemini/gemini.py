@@ -11,6 +11,7 @@ from any_llm.types.responses import Response, ResponsesParams, ResponseStreamEve
 
 from .base import GoogleProvider
 from .interactions import convert_interaction_to_response, convert_responses_params
+from .interactions_stream import convert_interaction_stream
 
 
 class GeminiProvider(GoogleProvider):
@@ -67,9 +68,6 @@ class GeminiProvider(GoogleProvider):
     async def _aresponses(
         self, params: ResponsesParams, **kwargs: Any
     ) -> Response | AsyncIterator[ResponseStreamEvent]:
-        if params.stream:
-            parameter_name = "stream"
-            raise UnsupportedParameterError(parameter_name, self.PROVIDER_NAME)
         if kwargs.pop("extra_body", None) is not None:
             parameter_name = "extra_body"
             raise UnsupportedParameterError(parameter_name, self.PROVIDER_NAME)
@@ -89,5 +87,8 @@ class GeminiProvider(GoogleProvider):
         )
         if timeout is not None:
             create_kwargs["timeout"] = timeout
+        if params.stream:
+            stream = await self.client.aio.interactions.create(**create_kwargs)
+            return convert_interaction_stream(stream, model=params.model)
         interaction = await self.client.aio.interactions.create(**create_kwargs)
         return convert_interaction_to_response(interaction)

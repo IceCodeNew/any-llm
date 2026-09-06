@@ -28,6 +28,7 @@ from google.genai.interactions import (
     TextDelta,
     ThoughtStep,
     UnknownInteractionSSEEvent,
+    UnknownStep,
     UnknownStepDeltaData,
     Usage,
     UserInputStep,
@@ -456,26 +457,57 @@ async def test_convert_interaction_stream_logs_and_skips_unknown_event(caplog: p
 
 
 @pytest.mark.asyncio
-async def test_convert_interaction_stream_logs_and_skips_unknown_delta(caplog: pytest.LogCaptureFixture) -> None:
-    started = StepStart(index=0, step=ModelOutputStep())
-    non_text = StepDelta(index=0, delta=ArgumentsDelta(arguments="{}"))
-    unknown = StepDelta(index=0, delta=UnknownStepDeltaData(raw={"type": "future_delta", "value": 1}))
-    stopped = StepStop(index=0)
+@pytest.mark.parametrize(
+    ("delta", "message"),
+    [
+        (ArgumentsDelta(arguments="{}"), "non-text model output delta"),
+        (UnknownStepDeltaData(raw={"type": "future_delta", "value": 1}), "unknown model output delta"),
+    ],
+)
+async def test_convert_interaction_stream_rejects_unsupported_model_delta(
+    delta: object,
+    message: str,
+) -> None:
+    with pytest.raises(ProviderError, match=message):
+        await _converted_events(
+            _created(),
+            StepStart(index=0, step=ModelOutputStep()),
+            StepDelta.model_validate({"index": 0, "delta": delta}),
+        )
 
-    with caplog.at_level(logging.WARNING, logger="any_llm"):
-        result = await _converted_events(_created(), started, non_text, unknown, stopped, _completed())
 
-    assert [event.type for event in result] == [
-        "response.created",
-        "response.in_progress",
-        "response.output_item.added",
-        "response.content_part.added",
-        "response.output_text.done",
-        "response.content_part.done",
-        "response.output_item.done",
-        "response.completed",
-    ]
-    assert "Skipping unknown Gemini Interactions step delta" in caplog.text
+@pytest.mark.asyncio
+async def test_convert_interaction_stream_ignores_non_model_step_deltas() -> None:
+    result = await _converted_events(
+        _created(),
+        StepStart(index=0, step=UserInputStep()),
+        StepDelta(index=0, delta=ArgumentsDelta(arguments="{}")),
+        StepStop(index=0),
+        _completed(),
+    )
+
+    assert [event.type for event in result] == ["response.created", "response.in_progress", "response.completed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "step",
+    [
+        ModelOutputStep(content=[ImageContent(data="aW1hZ2U=", mime_type="image/png")]),
+        ModelOutputStep(content=[TextContent(text="partial"), ImageContent(data="aW1hZ2U=", mime_type="image/png")]),
+        ThoughtStep(),
+        UnknownStep(raw={"type": "future_output"}),
+    ],
+)
+async def test_convert_interaction_stream_rejects_unsupported_output_and_closes_source(step: Step) -> None:
+    stream = AsyncMock()
+    stream.close = AsyncMock()
+    stream.__aiter__.return_value = [_created(), StepStart(index=0, step=step)]
+
+    with pytest.raises(ProviderError, match="model output"):
+        _ = [event async for event in convert_interaction_stream(stream, model="requested")]
+
+    stream.close.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
@@ -542,14 +574,6 @@ async def test_convert_interaction_stream_rejects_terminal_before_created() -> N
             "delta before step.start",
         ),
         (
-            [
-                _created(),
-                StepStart(index=0, step=UserInputStep()),
-                StepDelta(index=0, delta=TextDelta(text="unexpected")),
-            ],
-            "text for non-model step",
-        ),
-        (
             [_created(), StepStop(index=0)],
             "stopped unknown step",
         ),
@@ -613,6 +637,19 @@ async def test_convert_interaction_stream_preserves_primary_error_when_close_fai
         _ = [event async for event in convert_interaction_stream(stream, model="requested")]
 
     assert "Failed to close Gemini Interactions stream" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_convert_interaction_stream_preserves_unsupported_output_error_when_close_fails() -> None:
+    stream = AsyncMock()
+    stream.close = AsyncMock(side_effect=RuntimeError("close failed"))
+    stream.__aiter__.return_value = [
+        _created(),
+        StepStart(index=0, step=ModelOutputStep(content=[ImageContent(data="aW1hZ2U=", mime_type="image/png")])),
+    ]
+
+    with pytest.raises(ProviderError, match="non-text model output"):
+        _ = [event async for event in convert_interaction_stream(stream, model="requested")]
 
 
 @pytest.mark.asyncio

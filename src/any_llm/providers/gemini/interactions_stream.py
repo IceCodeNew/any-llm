@@ -15,7 +15,9 @@ from google.genai.interactions import (
     StepStop,
     TextContent,
     TextDelta,
+    ThoughtStep,
     UnknownInteractionSSEEvent,
+    UnknownStep,
     UnknownStepDeltaData,
 )
 from openai.types.responses import (
@@ -152,10 +154,15 @@ class _TextStreamState:
         if event.index in self.open_steps or event.index in self.text_by_step:
             _raise_stream_error(f"Gemini interaction stream started step {event.index} more than once")
         self.open_steps.add(event.index)
+        if isinstance(event.step, ThoughtStep | UnknownStep):
+            _raise_stream_error("Gemini interaction stream returned unsupported model output")
         if not isinstance(event.step, ModelOutputStep):
             return []
 
-        prefix = "".join(part.text for part in event.step.content or [] if isinstance(part, TextContent))
+        content = event.step.content or []
+        if any(not isinstance(part, TextContent) for part in content):
+            _raise_stream_error("Gemini interaction stream returned non-text model output")
+        prefix = "".join(part.text for part in content if isinstance(part, TextContent))
         self.text_by_step[event.index] = prefix
         output_index = len(self.output_index_by_step)
         self.output_index_by_step[event.index] = output_index
@@ -191,13 +198,11 @@ class _TextStreamState:
             _raise_stream_error("Gemini interaction stream emitted step.delta before interaction.created")
         if event.index not in self.open_steps:
             _raise_stream_error(f"Gemini interaction stream emitted a delta before step.start for step {event.index}")
-        if isinstance(event.delta, UnknownStepDeltaData):
-            logger.warning("Skipping unknown Gemini Interactions step delta: %s", event.delta.raw)
+        if event.index not in self.text_by_step:
             return []
         if not isinstance(event.delta, TextDelta):
-            return []
-        if event.index not in self.text_by_step:
-            _raise_stream_error(f"Gemini interaction stream emitted text for non-model step {event.index}")
+            kind = "unknown" if isinstance(event.delta, UnknownStepDeltaData) else "non-text"
+            _raise_stream_error(f"Gemini interaction stream returned {kind} model output delta")
         self.text_by_step[event.index] += event.delta.text
         return [self._text_delta(event.index, event.delta.text)]
 

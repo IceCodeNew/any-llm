@@ -7,6 +7,7 @@ from google.genai.interactions import (
     InteractionSseEventInteraction,
     ModelOutputStep,
     TextContent,
+    ThoughtStep,
     Usage,
 )
 from openai.types.responses import (
@@ -20,7 +21,7 @@ from openai.types.responses import (
 )
 from openai.types.responses.response_usage import InputTokensDetails, OutputTokensDetails
 
-from any_llm.exceptions import UnsupportedParameterError
+from any_llm.exceptions import ProviderError, UnsupportedParameterError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -94,8 +95,15 @@ def _messages_from_steps(
     messages: list[ResponseOutputMessage] = []
     for step in steps or []:
         if not isinstance(step, ModelOutputStep):
+            if isinstance(step, ThoughtStep):
+                message = "Gemini interaction returned unsupported thought output"
+                raise ProviderError(message, provider_name="gemini")
             continue
-        text_parts = [part.text for part in step.content or [] if isinstance(part, TextContent)]
+        content = step.content or []
+        if any(not isinstance(part, TextContent) for part in content):
+            message = "Gemini interaction returned unsupported non-text model output"
+            raise ProviderError(message, provider_name="gemini")
+        text_parts = [part.text for part in content if isinstance(part, TextContent)]
         if not text_parts:
             continue
         text = "".join(text_parts)

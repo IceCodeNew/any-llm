@@ -7,8 +7,10 @@ from google.genai import types
 from google.genai._gaos.types.interactions import Interaction
 from google.genai.interactions import (
     Error,
+    ImageContent,
     ModelOutputStep,
     TextContent,
+    ThoughtStep,
     Usage,
 )
 from openai.types.responses import (
@@ -109,19 +111,11 @@ def test_convert_interaction_preserves_empty_text_output() -> None:
     assert response.output_text == ""
 
 
-def test_convert_interaction_skips_unsupported_steps_and_content() -> None:
+def test_convert_interaction_ignores_non_output_steps() -> None:
     interaction = _interaction(
         steps=[
             {"type": "future_step", "future": True},
-            ModelOutputStep.model_validate({"content": [{"type": "future_content", "future": True}]}),
-            ModelOutputStep.model_validate(
-                {
-                    "content": [
-                        {"type": "future_content", "future": True},
-                        {"type": "text", "text": "kept"},
-                    ]
-                }
-            ),
+            ModelOutputStep(content=[TextContent(text="kept")]),
         ]
     )
 
@@ -130,6 +124,26 @@ def test_convert_interaction_skips_unsupported_steps_and_content() -> None:
     assert response.output_text == "kept"
     assert len(response.output) == 1
     assert response.output[0].id == "msg-0"
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        [ImageContent(data="aW1hZ2U=", mime_type="image/png")],
+        [TextContent(text="partial"), ImageContent(data="aW1hZ2U=", mime_type="image/png")],
+        [TextContent(text="partial"), {"type": "future_content", "future": True}],
+    ],
+)
+def test_convert_interaction_rejects_non_text_model_output(content: list[object]) -> None:
+    step = ModelOutputStep.model_validate({"content": content})
+
+    with pytest.raises(ProviderError, match="non-text model output"):
+        convert_interaction_to_response(_interaction(steps=[step]))
+
+
+def test_convert_interaction_rejects_thought_output() -> None:
+    with pytest.raises(ProviderError, match="thought output"):
+        convert_interaction_to_response(_interaction(steps=[ThoughtStep()]))
 
 
 def test_convert_interaction_maps_provider_error_without_raw_side_channel() -> None:

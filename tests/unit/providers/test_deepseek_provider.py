@@ -334,6 +334,26 @@ def test_deepseek_thinking_respects_explicit_extra_body_override() -> None:
     assert result["extra_body"] == {"thinking": {"type": "disabled"}, "user_id": "caller-user"}
 
 
+def test_deepseek_does_not_mutate_extra_body_when_merging_controls() -> None:
+    extra_body = {"custom": "value", "user_id": "caller-user"}
+    params = CompletionParams(
+        model_id="deepseek-v4-flash",
+        messages=[{"role": "user", "content": "hi"}],
+        reasoning_effort="low",
+        user="normalized-user",
+    )
+
+    result = DeepseekProvider._convert_completion_params(params, extra_body=extra_body)
+
+    assert extra_body == {"custom": "value", "user_id": "caller-user"}
+    assert result["extra_body"] == {
+        "custom": "value",
+        "thinking": {"type": "enabled"},
+        "user_id": "caller-user",
+    }
+    assert result["extra_body"] is not extra_body
+
+
 @pytest.mark.asyncio
 async def test_deepseek_emits_current_chat_wire_contract() -> None:
     requests: list[httpx.Request] = []

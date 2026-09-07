@@ -86,10 +86,8 @@ class DeepseekProvider(BaseOpenAIProvider):
         thinking = {"type": thinking_type} if thinking_type is not None else None
 
         if user_id is not None or thinking is not None:
-            extra_body = converted_params.get("extra_body")
-            if extra_body is None:
-                extra_body = {}
-                converted_params["extra_body"] = extra_body
+            extra_body = dict(converted_params.get("extra_body") or {})
+            converted_params["extra_body"] = extra_body
             if user_id is not None and "user_id" not in extra_body:
                 # DeepSeek's user_id contract is stricter than any-llm's shared user field.
                 # https://api-docs.deepseek.com/quick_start/rate_limit/#setting-user_id

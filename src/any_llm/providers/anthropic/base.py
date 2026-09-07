@@ -45,7 +45,8 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterator, Sequence
 
     from anthropic import AsyncAnthropic, AsyncAnthropicVertex
-    from anthropic.types import Message
+    from anthropic.lib.streaming import MessageStreamEvent as AnthropicStreamEvent
+    from anthropic.types import Message, RawMessageStreamEvent
     from anthropic.types.beta.parsed_beta_message import ParsedBetaMessage
     from anthropic.types.messages.message_batch import MessageBatch
     from anthropic.types.model_info import ModelInfo as AnthropicModelInfo
@@ -95,16 +96,16 @@ _ANTHROPIC_TO_OPENAI_STATUS_MAP: dict[str, str] = {
 }
 
 
-def _get_context_edit_value(edit: Any, field: str) -> Any:
+def _get_context_edit_value(edit: object, field: str) -> object:
     return edit.get(field) if isinstance(edit, Mapping) else getattr(edit, field, None)
 
 
-def _get_context_edit_type(edit: Any) -> str | None:
+def _get_context_edit_type(edit: object) -> str | None:
     edit_type = _get_context_edit_value(edit, "type")
     return edit_type if isinstance(edit_type, str) else None
 
 
-def _validate_compaction_trigger(edit: Any) -> None:
+def _validate_compaction_trigger(edit: object) -> None:
     trigger = _get_context_edit_value(edit, "trigger")
     if trigger is None or _get_context_edit_value(trigger, "type") != "input_tokens":
         return
@@ -261,7 +262,9 @@ class BaseAnthropicProvider(AnyLLM, ABC):
 
     @staticmethod
     @override
-    def _convert_completion_chunk_response(response: Any, **kwargs: Any) -> ChatCompletionChunk:
+    def _convert_completion_chunk_response(
+        response: RawMessageStreamEvent | AnthropicStreamEvent, **kwargs: Any
+    ) -> ChatCompletionChunk:
         """Convert Anthropic streaming chunk to OpenAI ChatCompletionChunk format."""
         model_id = kwargs.get("model_id", "unknown")
         return _create_openai_chunk_from_anthropic_chunk(response, model_id)
@@ -324,7 +327,6 @@ class BaseAnthropicProvider(AnyLLM, ABC):
         header_betas = _pop_anthropic_beta_header(kwargs)
         betas = _messages_betas(params, header_betas)
         use_beta = params.context_management is not None or bool(betas)
-        messages_resource: Any
 
         sampling = {
             name: value
@@ -334,6 +336,9 @@ class BaseAnthropicProvider(AnyLLM, ABC):
         if sampling:
             _set_deprecated_sampling_extra_body(kwargs, sampling)
 
+        # GA, beta, and Vertex resources have incompatible SDK method overloads.
+        # Keep the dynamic boundary here rather than duplicating request handling.
+        messages_resource: Any
         if params.output_format is not None:
             messages_resource = self.client.beta.messages if use_beta else self.client.messages
             native_kwargs = params.model_dump(
@@ -351,7 +356,7 @@ class BaseAnthropicProvider(AnyLLM, ABC):
             # thing on both paths; the native API requires the output_config nesting.
             output_config = normalize_output_config(cast("dict[str, Any]", params.output_format))
             with _translating_nonstreaming_guard(self, params.max_tokens):
-                message = await messages_resource.create(output_config=cast("Any", output_config), **native_kwargs)
+                message = await messages_resource.create(output_config=output_config, **native_kwargs)
             return self._convert_native_message_to_response(message)
 
         api_kwargs = params.model_dump(

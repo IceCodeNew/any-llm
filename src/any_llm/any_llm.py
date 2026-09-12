@@ -967,6 +967,8 @@ class AnyLLM(ABC):
                 Anthropic's ``ParsedMessage`` for types or mappings with a non-empty schema dict;
                 mappings without one return ``MessageResponse``. Providers with native support
                 can stream schema-constrained Messages events instead.
+                Native Anthropic typed beta requests return ``ParsedBetaMessage`` when
+                ``context_management`` is set or beta identifiers are supplied.
             timeout: Per-request timeout in seconds, passed through to the provider's client/SDK.
                 An explicit ``None`` is treated the same as omitting it (the provider's default
                 applies), so it cannot request an unbounded timeout. Providers that have no
@@ -976,6 +978,7 @@ class AnyLLM(ABC):
 
         Returns:
             MessageResponse, or ParsedMessage for a typed or schema-backed `output_format`.
+            Native Anthropic typed beta requests return ParsedBetaMessage instead.
             Streaming calls return an async iterator of MessageStreamEvent.
 
         Raises:

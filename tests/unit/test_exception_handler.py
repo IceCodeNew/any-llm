@@ -144,6 +144,27 @@ async def test_stream_wrapper_translates_close_only_failure(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_stream_wrapper_closes_source_with_sync_close() -> None:
+    class Source:
+        closed = 0
+
+        def __aiter__(self) -> "Source":
+            return self
+
+        async def __anext__(self) -> str:
+            return "event"
+
+        def close(self) -> None:
+            self.closed += 1
+
+    source = Source()
+    stream = await _StreamingProvider(source).request()
+    assert await anext(stream) == "event"
+    await stream.aclose()
+    assert source.closed == 1
+
+
+@pytest.mark.asyncio
 async def test_stream_wrapper_accepts_source_without_close_protocol() -> None:
     class Source:
         def __aiter__(self) -> "Source":
